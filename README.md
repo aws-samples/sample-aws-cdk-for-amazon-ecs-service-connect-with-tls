@@ -171,3 +171,12 @@ Run the following command to delete the imported certificate. _If the $ALB_CERTI
 ```bash
 aws acm delete-certificate --certificate-arn $ALB_CERTIFICATE_ARN
 ```
+
+## Security
+See CONTRIBUTING for more information.
+
+## License
+This library is licensed under the MIT-0 License. See the LICENSE file.
+
+## Disclaimer
+The solution architecture sample code is provided without any guarantees, and you're not recommended to use it for production-grade workloads. The intention is to provide content to build and learn. Be sure of reading the licensing terms.
