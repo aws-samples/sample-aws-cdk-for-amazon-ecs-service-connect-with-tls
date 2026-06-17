@@ -61,7 +61,7 @@ export class EcsServices extends Construct {
       networkConfiguration: {
         awsvpcConfiguration: {
           securityGroups: [props.backendTaskSecurityGroupId],
-          subnets: props.subnets,
+          subnets: [props.subnets[1]],
           assignPublicIp: "DISABLED",
         },
       },
@@ -88,7 +88,7 @@ export class EcsServices extends Construct {
       networkConfiguration: {
         awsvpcConfiguration: {
           securityGroups: [props.backendTaskSecurityGroupId],
-          subnets: props.subnets,
+          subnets: [props.subnets[1]],
           assignPublicIp: "DISABLED",
         },
       },
@@ -120,7 +120,7 @@ export class EcsServices extends Construct {
       networkConfiguration: {
         awsvpcConfiguration: {
           securityGroups: [props.frontendTaskSecurityGroupId],
-          subnets: props.subnets,
+          subnets: [props.subnets[0]],
           assignPublicIp: "DISABLED",
         },
       },

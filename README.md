@@ -85,7 +85,7 @@ aws ec2 create-vpc-encryption-control \
 Send requests to the application:
 
 ```bash
-hey -n 1000 -c 1 -q 100 $APP_URL/home
+hey -n 1000 -c 1 -q 100 $APP_URL/catalog
 ```
 
 ### Step 5 — Check VPC Flow Logs (Traffic Not Encrypted)
@@ -113,7 +113,7 @@ The script reboots the Aurora database, triggers a new deployment for each servi
 Send more requests to the application:
 
 ```bash
-hey -n 1000 -c 1 -q 100 $APP_URL/home
+hey -n 1000 -c 1 -q 100 $APP_URL/catalog
 ```
 
 ### Step 8 — Verify Traffic Is Now Encrypted (Status `1`)
@@ -161,7 +161,7 @@ aws ecs execute-command --cluster $CLUSTER \
   --command "/bin/bash"
 ```
 
-Once inside the container, install `openssl` and verify the TLS certificate on the Catalog service:
+Once inside the container, install `openssl` and verify the TLS certificate on the Catalog service. Replace `<CATALOG_PRIVATE_IP>` with the Catalog private IP printed in the previous step:
 
 ```bash
 dnf install openssl -y
@@ -193,11 +193,17 @@ To avoid ongoing charges, destroy all resources when you're done. This removes t
 ```bash
 # Delete the VPC Encryption Control
 VPC_ENCRYPTION_CONTROL_ID=$(aws ec2 describe-vpc-encryption-controls \
-  --filters "Name=vpc-id,Values=$VPC_ID" \
+  --vpc-ids $VPC_ID \
   --query "VpcEncryptionControls[0].VpcEncryptionControlId" \
   --output text)
 aws ec2 delete-vpc-encryption-control \
     --vpc-encryption-control-id $VPC_ENCRYPTION_CONTROL_ID
+
+# Force delete ECS services
+CLUSTER=ecs-sample-cluster
+for SERVICE in tls-catalog tls-assets tls-ui; do
+  aws ecs delete-service --cluster $CLUSTER --service $SERVICE --force --no-cli-pager
+done
 
 # Destroy all AWS resources created by the CDK stack
 cdk destroy EcsServiceConnectTls --force
