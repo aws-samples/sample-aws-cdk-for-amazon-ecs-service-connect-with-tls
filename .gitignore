@@ -10,3 +10,8 @@ images/.DS_Store
 cdk.out
 .DS_Store
 package-lock.json
+
+# Certificates and OpenSSL config
+*.pem
+*.cnf
+cdk.context.json

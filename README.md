@@ -1,182 +1,210 @@
-# Sample CDK configuration for Amazon ECS Service Connect with TLS
+# Amazon ECS Service Connect with TLS — Verifying Encryption with VPC Flow Logs
 
-In this sample repository we are going to deploy a multi-layer application on [Amazon Elastic Container Service (Amazon ECS)](https://aws.amazon.com/ecs/) and [AWS Fargate](https://aws.amazon.com/fargate/), by leveraging [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html) for service-to-service communication with TLS enabled.
+Deploy a multi-layer application on [Amazon ECS](https://aws.amazon.com/ecs/) with [AWS Fargate](https://aws.amazon.com/fargate/), using [Amazon ECS Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html) for encrypted service-to-service communication. Then use [VPC Encryption Controls](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-encryption-controls.html) and VPC Flow Logs to verify that traffic between services is encrypted.
 
-Amazon ECS Service Connect is the recommended approach for handling service-to-service communication, offering features such as service discovery, connectivity, and traffic monitoring. With Service Connect, your applications can utilize short names and standard ports to connect to ECS services within the same cluster, across different clusters, and even across VPCs within the same AWS Region. [For more detailed information, please refer to the AWS documentation.](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/networking-connecting-services.html#networking-connecting-services-serviceconnect)
+## Application Overview
 
-Amazon ECS Service Connect supports automatic traffic encryption using _Transport Layer Security (TLS)_ certificates for Amazon ECS services. By configuring your Amazon ECS services to use an [AWS Private Certificate Authority](https://docs.aws.amazon.com/privateca/latest/userguide/PcaWelcome.html), Amazon ECS automatically provisions TLS certificates to encrypt traffic between your Amazon ECS Service Connect services. Amazon ECS handles the generation, rotation, and distribution of TLS certificates used for traffic encryption. [You can find more information here.](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect-tls.html)
-
-To deploy the application you will leverage [AWS Cloud Development Kit (AWS CDK)](https://aws.amazon.com/cdk/).
-
-## Sample Application Overview
-
-In this sample repository utilize a common sample application to provide actual container components. The sample application models a simple web store application, where customers can browse a catalog, add items to their cart, and complete an order through the checkout process.
+This sample deploys a web store application with the following components:
 
 ![Sample application home page](/images/home.png)
 
-### Sample Application Components
+| Component     | Description                                                     |
+| ------------- | :-------------------------------------------------------------- |
+| UI            | Front-end user interface, aggregates API calls to other services |
+| Catalog       | API for product listings and details                            |
+| Static assets | Serves static assets like product images                        |
 
-The application consists of several components and dependencies:
+Source code for the full sample application: [GitHub](https://github.com/aws-containers/retail-store-sample-app)
 
-![Sample application architecture](/images/architecture.png)
+## Architecture
 
-| Component     | Description                                                                                   |
-| ------------- | :-------------------------------------------------------------------------------------------- |
-| UI            | Provides the front end user interface and aggregates API calls to the various other services. |
-| Catalog       | API for product listings and details                                                          |
-| Cart          | API for customer shopping carts                                                               |
-| Checkout      | API to orchestrate the checkout process                                                       |
-| Orders        | API to receive and process customer orders                                                    |
-| Static assets | Serves static assets like images related to the product catalog                               |
+![Amazon ECS Service Connect With TLS Architecture](/images/service-connect-with-tls-architecture.png)
 
-You can find the complete source code for the sample application on [GitHub](https://github.com/aws-containers/retail-store-sample-app).
+Key components:
+- **VPC** with public and private subnets, NAT Gateway, and VPC Flow Logs (with encryption status field)
+- **ECS Cluster** running on AWS Fargate
+- **ECS Service Connect with TLS** — automatic mTLS between services via AWS Private CA
+- **Application Load Balancer** — HTTPS listener with self-signed certificate
+- **Aurora MySQL Serverless v2** — shared database for the product catalog
+- **AWS Private Certificate Authority** — provisions and rotates certificates for Service Connect TLS
+- **AWS Cloud Map** — namespace for Service Connect service discovery
+- **VPC Flow Logs** — all traffic logged to CloudWatch with custom format including `encryption-status`
 
-The application consists of several components and dependencies however, in this sample repository you are going to deploy:
-- the `UI` component
-- the `Static assets` component
-- the `Catalog` component
+Infrastructure is defined using [AWS CDK](https://aws.amazon.com/cdk/).
 
-## Sample Application Architecture
+## Prerequisites
 
-Below is the architecture that you will deploy
+- AWS CLI configured with appropriate credentials
+- Node.js (v18+)
+- AWS CDK CLI (`npm install -g aws-cdk`)
+- [hey](https://github.com/rakyll/hey) load generator (`brew install hey` on macOS)
+- An AWS account with permissions to create VPCs, ECS clusters, RDS instances, Private CA, and CloudWatch resources
 
-![Amazon ECS Service Connect With TLS Architecture](/images/service-connect-with-tls-architecture.jpg)
+**Warning! Review the [AWS Pricing page](https://aws.amazon.com/pricing/) for cost details before deploying. Note the [AWS Private CA pricing](https://aws.amazon.com/private-ca/pricing/) in particular.**
 
-- **Application Load Balancer (ALB)**: the ALB is exposing the `UI` component frontend with a self-signed HTTPS endpoint.
-- **AWS Certificate Manager (ACM)**: the ACM is holding the self-signed certificate of the ALB.
-- **Amazon ECS Services**: the 3 application components: `UI`, `Static assets`, `Catalog`, are deployed as ECS Services with ECS Service Connect enabled. 
-- **AWS Private Certificate Authority (CA)**: the Private CA allow Amazon ECS to automatically provisions TLS certificates to encrypt traffic between your Amazon ECS Service Connect services. _Please be aware of the [AWS Private CA Pricing.](https://aws.amazon.com/private-ca/pricing/)_
-- **AWS Cloud Map**: Amazon ECS Service Connect leverage the AWS Cloud Map namespace for service discoverability.
-- **Amazon Aurora**: the `Catalog` service leverage the Amazon Aurora MySQL for storing application sample products catalog.
+## Deployment
 
-## Sample Application Deployment
-
-**Warning! - Before starting the deployment, please be aware of the cost associated with running the following sample architecture by reviewing the pricing information associated for all the AWS services used in the Sample CDK. Review the [AWS Pricing page](https://aws.amazon.com/pricing/) for more details.**
-
-To deploy the sample architecture you will need to follow the steps below:
-1. Create a Certificate for the ALB
-2. Install the required dependencies and Bootstrap the CDK
-4. Deploy the infrastructure
-5. Deploy the task definitions
-6. Deploy the ECS Services
-
-**Note: In this sample project, just for demo purposes, we are going to leverage a self-signed certificate, however this is not recommended to be used in production or in real application deployment.**
-
-### Create a Self-Signed Certificate
-
-Run the following command to create a self-signed certificate.
-
-1. create the a private key
+### Step 1 — Clone the Repository
 
 ```bash
-openssl genrsa 2048 > my-private-key.pem
+git clone https://github.com/aws-samples/ecs-service-connect-samples.git
+cd ecs-service-connect-samples
 ```
 
-2. create the a new self-signed certificate
+### Step 2 — Run the Setup Script
+
+The setup script creates a self-signed certificate, imports it into ACM, installs dependencies, and deploys the CDK stack. The stack deploys the application with ECS Service Connect TLS enabled, but **without VPC Encryption Controls** — so the flow logs won't yet report encryption status. It typically takes 15–20 minutes.
 
 ```bash
-cat << EOF > openssl.cnf
-[ req ]
-prompt = no
-distinguished_name = req_distinguished_name
-
-[ req_distinguished_name ]
-C = US
-ST = None
-L = None
-O = Sample
-OU = Sample Application
-CN = *.amazonaws.com
-emailAddress = test@email.com
-EOF
-
-openssl req -new -x509 -config openssl.cnf -nodes -sha256 -days 365 -key my-private-key.pem -outform PEM -out my-certificate.pem
+sh scripts/setup.sh
 ```
 
-3. import the certificate into te AWS Certificate Manager
+Once the script completes, export the values it prints:
 
 ```bash
-export ALB_CERTIFICATE_ARN=$(aws acm import-certificate --certificate fileb://my-certificate.pem --private-key fileb://my-private-key.pem --output text)
+export ALB_CERTIFICATE_ARN=<value from script output>
+export APP_URL=<value from script output>
+export VPC_ID=<value from script output>
+export FLOW_LOGS_ARN=<value from script output>
 ```
 
-### Install Dependencies And Bootstrap The CDK
+## Verifying Encryption with VPC Flow Logs
 
-1. install the required CDK dependencies 
+### Step 3 — Enable VPC Encryption Controls
+
+Enable VPC Encryption Controls in monitor mode to get visibility into the encryption status of traffic. This also enables reporting of the `encryption-status` field in VPC Flow Logs.
 
 ```bash
-npm install
+aws ec2 create-vpc-encryption-control \
+  --vpc-id $VPC_ID \
+  --tag-specifications 'ResourceType=vpc-encryption-control,Tags=[{Key=Name,Value=ecs-sample-encryption-control}]'
 ```
 
-2. Bootstrap the CDK stack
+### Step 4 — Generate Traffic
+
+Send requests to the application:
 
 ```bash
-cdk bootstrap
+hey -n 1000 -c 1 -q 100 $APP_URL/home
 ```
 
-### Identify the correct ip range to configure your ALB
+### Step 5 — Check VPC Flow Logs (Traffic Not Encrypted)
 
-Below you can select the correct `IP_RANGE` to be associated to the security Group associated to your Application Load Balancer (ALB).
+Query the flow logs to see the encryption status. Since the services were deployed before VPC Encryption Controls were enabled, the traffic is still **not encrypted at the VPC level**. Different resources require different steps to become encrypted — see the [documentation](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-encryption-controls.html) for details. For AWS Fargate tasks specifically, encryption takes effect automatically the next time a task is replaced, whether through a new deployment, a rolling update, or a platform version refresh.
 
 ```bash
-IP_RANGE="0.0.0.0/0"
+sh scripts/query-flow-logs.sh
 ```
 
-**Note: For demo purpose we are going to leverage the wide open ip range `0.0.0.0/0`, however this is not recommend to be used in production. [Check the documentation for more information](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/security-group-rules-reference.html)**
+The `encryption-status` column should show `0` (not encrypted) for traffic between the services. In the next steps, we will force the AWS Fargate deployment and reboot the Aurora Serverless database to accelerate the migration to encrypted hardware for demo purposes.
 
-### Deploy The CDK Stack
+### Step 6 — Force Redeployment of Services
 
-1. Deploy the infrastructure stack
+Force a redeployment so the tasks pick up the VPC Encryption Controls. For demo purposes, the script also enables ECS Exec (`--enable-execute-command`) to allow remote access into the running containers for TLS certificate verification in Step 9.
 
 ```bash
-cdk deploy SampleInfra --parameters certArn=$ALB_CERTIFICATE_ARN --parameters ipRange=$IP_RANGE
+sh scripts/force-redeploy-services.sh
 ```
 
-2. Deploy the task definitions stack
+The script reboots the Aurora database, triggers a new deployment for each service with remote access enabled, and waits for them to stabilize.
+
+### Step 7 — Generate More Traffic
+
+Send more requests to the application:
 
 ```bash
-cdk deploy SampleTaskDefinitionsStack
+hey -n 1000 -c 1 -q 100 $APP_URL/home
 ```
 
-3. Deploy the Amazon ECS Service stack
+### Step 8 — Verify Traffic Is Now Encrypted (Status `1`)
+
+Query the flow logs again:
 
 ```bash
-cdk deploy SampleEcsServices
+sh scripts/query-flow-logs.sh
 ```
 
-## Sample Application Test
+The `encryption-status` column for traffic between ECS tasks and the database should now show `1`, confirming that VPC Encryption Controls are actively encrypting traffic at the Nitro hardware level. Note that not all services are encrypted immediately — some resources (such as the Application Load Balancer) migrate automatically in the background and may take additional time before their traffic shows as encrypted. See the [VPC Encryption Controls documentation](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-encryption-controls.html) for details on automatic migration timelines.
 
-Run the following command to extract the Application Load Balancer DNS name.
+## Verifying ECS Service Connect TLS Certificate
+
+### Step 9 — Verify the TLS Certificate
+
+Connect to a running task and verify that Service Connect TLS is using certificates for service-to-service communication.
+
+First, get the private IP of the Catalog task and a UI task ARN to exec into:
+
 ```bash
-ALB_DNS=$(aws elbv2 describe-load-balancers \
-    --names ecs-sample-alb \
-    --query 'LoadBalancers[0].DNSName' \
-    --output text)
-echo https://$ALB_DNS
+CLUSTER=ecs-sample-cluster
+
+CATALOG_TASK_ARN=$(aws ecs list-tasks --cluster $CLUSTER \
+  --service-name tls-catalog --query 'taskArns[0]' --output text)
+
+CATALOG_PRIVATE_IP=$(aws ecs describe-tasks --cluster $CLUSTER --tasks $CATALOG_TASK_ARN \
+  --query "tasks[0].containers[?name=='application'].networkInterfaces[0].privateIpv4Address" \
+  --output text)
+
+UI_TASK_ARN=$(aws ecs list-tasks --cluster $CLUSTER \
+  --service-name tls-ui --query 'taskArns[0]' --output text)
+
+echo "Catalog Private IP: $CATALOG_PRIVATE_IP"
+echo "UI Task ARN:        $UI_TASK_ARN"
 ```
 
-Navigate to the web application.
-
-![Application with Self Signed Certificate](/images/service-connect-ui-tls-cert-exeption.png)
-
-## Sample Application Clean-Up
-
-Run the following command to destroy the deployed application
+Start an interactive session in the UI task:
 
 ```bash
-cdk destroy --all
+aws ecs execute-command --cluster $CLUSTER \
+  --task $UI_TASK_ARN \
+  --container application \
+  --interactive \
+  --command "/bin/bash"
 ```
 
-Run the following command to delete the imported certificate. _If the $ALB_CERTIFICATE_ARN is not set, locate the certificate ARN from the AWS Console._
+Once inside the container, install `openssl` and verify the TLS certificate on the Catalog service:
 
 ```bash
+dnf install openssl -y
+
+openssl s_client -connect <CATALOG_PRIVATE_IP>:8080 < /dev/null 2>/dev/null \
+  | openssl x509 -noout -text
+```
+
+You should see a certificate issued by your Private CA with a Subject Alternative Name matching `tls-catalog.ecs-sample.local`, confirming that ECS Service Connect TLS is encrypting service-to-service traffic with automatically rotated certificates.
+
+To exit the session:
+
+```bash
+exit
+```
+
+## Scripts
+
+| Script | Description |
+| ------ | ----------- |
+| `scripts/setup.sh` | End-to-end setup: generates certificate, imports to ACM, installs deps, bootstraps CDK, deploys stack |
+| `scripts/force-redeploy-services.sh` | Reboots Aurora DB, forces ECS service redeployment with exec enabled, waits for stability |
+| `scripts/query-flow-logs.sh` | Retrieves ECS task IPs and queries VPC Flow Logs filtered by those IPs |
+
+## Clean-Up
+
+To avoid ongoing charges, destroy all resources when you're done. This removes the VPC, ECS cluster, Aurora database, Private CA, ALB, and all associated resources. The VPC Encryption Control and ACM certificate were created outside of CDK, so they need to be deleted separately.
+
+```bash
+# Delete the VPC Encryption Control
+VPC_ENCRYPTION_CONTROL_ID=$(aws ec2 describe-vpc-encryption-controls \
+  --filters "Name=vpc-id,Values=$VPC_ID" \
+  --query "VpcEncryptionControls[0].VpcEncryptionControlId" \
+  --output text)
+aws ec2 delete-vpc-encryption-control \
+    --vpc-encryption-control-id $VPC_ENCRYPTION_CONTROL_ID
+
+# Destroy all AWS resources created by the CDK stack
+cdk destroy EcsServiceConnectTls --force
+
+# Delete the self-signed certificate from ACM
 aws acm delete-certificate --certificate-arn $ALB_CERTIFICATE_ARN
+
+# Remove local certificate files
+rm -f my-private-key.pem my-certificate.pem openssl.cnf
 ```
-
-## Security
-See CONTRIBUTING for more information.
-
-## License
-This library is licensed under the MIT-0 License. See the LICENSE file.
-
-## Disclaimer
-The solution architecture sample code is provided without any guarantees, and you're not recommended to use it for production-grade workloads. The intention is to provide content to build and learn. Be sure of reading the licensing terms.
