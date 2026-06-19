@@ -151,23 +151,14 @@ echo "Catalog Private IP: $CATALOG_PRIVATE_IP"
 echo "UI Task ARN:        $UI_TASK_ARN"
 ```
 
-Start an interactive session in the UI task:
+Start an interactive session in the UI task, and once inside the container, install `openssl` and verify the TLS certificate on the Catalog service:
 
 ```bash
 aws ecs execute-command --cluster $CLUSTER \
   --task $UI_TASK_ARN \
   --container application \
-  --interactive \
-  --command "/bin/bash"
-```
-
-Once inside the container, install `openssl` and verify the TLS certificate on the Catalog service. Replace `<CATALOG_PRIVATE_IP>` with the Catalog private IP printed in the previous step:
-
-```bash
-dnf install openssl -y
-
-openssl s_client -connect <CATALOG_PRIVATE_IP>:8080 < /dev/null 2>/dev/null \
-  | openssl x509 -noout -text
+  --command "/bin/bash -c 'dnf install openssl -y && openssl s_client -connect ${CATALOG_PRIVATE_IP}:8080 < /dev/null 2>/dev/null | openssl x509 -noout -text'" \
+  --interactive
 ```
 
 You should see a certificate issued by your Private CA with a Subject Alternative Name matching `tls-catalog.ecs-sample.local`, confirming that ECS Service Connect TLS is encrypting service-to-service traffic with automatically rotated certificates.
